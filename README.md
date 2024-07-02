@@ -5,7 +5,7 @@ R package with utility functions for converting methylation data to `bsseq` obje
 ## Installation
 
 ```R
-devtools::install_github("dhspence/dhsrmethtools")
+devtools::install_github("dhslab/dhsrmethtools")
 
 ## Usage
 
@@ -16,7 +16,7 @@ pbcpg2bsseq()
 
 
 
-## To-Do List
+### To-Do List
 
 - [x] Update callHapDmrs function to include cpg and length parameters
 - [ ] Update filterHapDmrs function
