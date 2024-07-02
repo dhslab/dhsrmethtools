@@ -1,0 +1,22 @@
+Package: dhsrmethtools
+Type: Package
+Title: DHS R Methylation ultilities
+Version: 0.1.0
+Author: David H. Spencer
+Maintainer: Your Name <dspencer@wustl.edu>
+Description: Some simple R functions for handling methylation data.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Imports:
+    data.table,
+    GenomicRanges,
+    IRanges,
+    bsseq,
+    HDF5Array
+Remotes: 
+    bioc::GenomicRanges,
+    bioc::IRanges,
+    bioc::bsseq,
+    bioc::HDF5Array
+RoxygenNote: 7.3.1

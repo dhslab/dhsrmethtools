@@ -1,0 +1,13 @@
+.DS_Store
+*.pyc
+.vscode
+.devcontainer
+.editorconfig
+.prettierignore
+.prettierrc.yml
+**/.dir_bash_history
+**/.ipynb_checkpoints
+**/~*
+**/._*
+__pycache__
+**/__pycache__
