@@ -6,7 +6,7 @@ R package with utility functions for converting methylation data to `bsseq` obje
 
 ```R
 devtools::install_github("dhslab/dhsrmethtools")
-
+```
 ## Usage
 
 library(dhsrmethtools)
