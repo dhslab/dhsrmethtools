@@ -1,6 +1,6 @@
 # dhsrmethtools
 
-R package for utitltiy functions to convert various methylation bed files to bsseq objects.
+R package with utility functions for converting methylation data to `bsseq` objects, performing differential methylation analysis, and filtering DMRs.
 
 ## Installation
 
