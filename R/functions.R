@@ -215,6 +215,9 @@ hapBSseq <- function(hap1_file, hap2_file, combined_file, sample_name = NULL, pl
 #' @param ncores Integer, number of cores to use. Default is 1.
 #' @param dmr_delta Numeric, delta value for callDMR function. Default is 0.35.
 #' @param dmr_p_threshold Numeric, p-value threshold for callDMR function. Default is 0.05.
+#' @param min.cpg.coverage Integer, minimum coverage for a CpG site to be considered. Default is 2.
+#' @param min.cpgs Integer, minimum number of CpG sites in a region to be considered. Default is 5.
+#' @param min.length Integer, minimum length of a DMR region to be considered. Default is 100.
 #' @param output Character, path to save the output. If NULL, the function returns the DMR object.
 #'               The file extension determines the output format:
 #'               - "rda": Saves the DMRs as an R data file (.rda).
