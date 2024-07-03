@@ -46,7 +46,7 @@ bed2bsseq <- function(file,samplename=basename(file)){
   data$meth <- data$meth * data$cov
   hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
   hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
-  bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$start,data$end)),sampleNames=samplename)
+  bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
   return(bsOut)
 }
 
@@ -302,6 +302,9 @@ callHapDmrs <- function(bs,
 #' @param ncores Integer, number of cores to use. Default is 1.
 #' @param dmr_delta Numeric, delta value for callDMR function. Default is 0.35.
 #' @param dmr_p_threshold Numeric, p-value threshold for callDMR function. Default is 0.05.
+#' @param min.cpg.coverage Integer, minimum coverage for a CpG site to be considered. Default is 2.
+#' @param min.cpgs Integer, minimum number of CpG sites in a region to be considered. Default is 5.
+#' @param min.length Integer, minimum length of a DMR region to be considered. Default is 100.
 #' @param output Character, path to save the output. If NULL, the function returns the DMR object.
 #'               The file extension determines the output format:
 #'               - "rda": Saves the DMRs as an R data file (.rda).
@@ -324,6 +327,9 @@ callDmrs <- function(sample_dir,
                         ncores = 1, 
                         dmr_delta = 0.35, 
                         dmr_p_threshold = 0.05, 
+                        min.cpg.coverage = 2,
+                        min.cpgs = 5,
+                        min.length = 100,
                         output = NULL) {
   # Check if the output directory exists
   if (!is.null(output)) {
@@ -388,7 +394,7 @@ callDmrs <- function(sample_dir,
   bs_combined <- bsseq::combineList(bsList, BACKEND = "HDF5Array")
   
   # Filter for coverage
-  bs_filtered <- bs_combined[which(rowMax(as.matrix(getCoverage(bs_combined, type = "Cov"))) > 0), ]
+  bs_filtered <- bs_combined[which(rowMax(as.matrix(getCoverage(bs_combined, type = "Cov"))) > min.cpg.coverage), ]
 
   
   # Perform DML testing
@@ -397,6 +403,9 @@ callDmrs <- function(sample_dir,
   # Call DMRs
   dmrs <- DSS::callDMR(dml_results, delta = dmr_delta, p.threshold = dmr_p_threshold)
   
+  # filter to retain hapDMRs with min.cpgs CpGs and min.length length (in bp)
+  dmrs <- dmrs[which(dmrs$nCG >= min.cpgs & dmrs$length >= min.length),]
+
   # Save or return DMRs based on output
   if (!is.null(output)) {
     file_ext <- tools::file_ext(output)
@@ -421,8 +430,6 @@ callDmrs <- function(sample_dir,
 }
 
 
-
-
 #' filterHapDmrs
 #' Filter Haplotype-Specific Differentially Methylated Regions
 #'
@@ -434,10 +441,9 @@ callDmrs <- function(sample_dir,
 #' @param normal.bs A BSseq object containing methylation data for the normal sample (optional).
 #' @param normal.sample.name Character string specifying the name of the normal sample (optional).
 #' @param vcffile Path to a VCF file for identifying divergent regions (optional).
+#' @param svvcffile Path to SV VCF file for filtering out DMRs near SVs (optional).
+#' @param sv.breakend.window bp to flank SV breakends for filtering DMRs (default: 1000).
 #' @param min.diff Numeric value specifying the minimum methylation difference to consider (default: 0.4).
-#' @param min.cpgs Integer specifying the minimum number of CpGs required in a region (default: 5).
-#' @param min.length Integer specifying the minimum length of a region in base pairs (default: 100).
-#' @param min.coverage Integer specifying the minimum coverage required for a region (default: 60).
 #' @param excludeRegions A GRanges object specifying regions to exclude from the analysis (default: empty GRanges).
 #' @param namehap1 Character string specifying the name of haplotype 1 in the aml.bs object (default: first sample name containing "hap1").
 #' @param namehap2 Character string specifying the name of haplotype 2 in the aml.bs object (default: first sample name containing "hap2").
@@ -469,7 +475,7 @@ callDmrs <- function(sample_dir,
 #' @importFrom GenomicRanges GRanges
 #'
 #' @export
-filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffile=NULL,min.diff=.4,excludeRegions=GRanges(),namehap1=grep("hap1",sampleNames(aml.bs),value=T)[1],namehap2=grep("hap2",sampleNames(aml.bs),value=T)[1],filter.sex.chromosomes=TRUE,run.fisher.test=FALSE){
+filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffile=NULL,svvcffile=NULL,sv.breakend.window=1000,min.diff=.4,excludeRegions=GRanges(),namehap1=grep("hap1",sampleNames(aml.bs),value=T)[1],namehap2=grep("hap2",sampleNames(aml.bs),value=T)[1],filter.sex.chromosomes=TRUE,run.fisher.test=FALSE){
     require(methylKit)
     require(bsseq)
     require(vcfR)
@@ -515,7 +521,7 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
     # Function to import VCF and calculate heterozygous passing variants in 10kbp windows
     getDivergentRegions <- function(vcf_file) {
       # Import VCF file
-      vcf <- read.vcfR(vcf_file)
+      vcf <- read.vcfR(vcf_file, verbose=F)
       
       # Extract genotype information
       gt <- extract.gt(vcf, element = "GT", as.numeric = TRUE)
@@ -563,6 +569,68 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
       return(high_het_windows)
     }
 
+    # get SV breakpoints from VCF file and create GRanges object with a window around these regions
+    get_sv_breakends <- function(svvcf_file, window = 1000) {
+  
+      # Read the VCF file
+      vcf <- read.vcfR(svvcf_file,verbose = F)
+      
+      # Extract chromosome lengths from VCF header
+      contigs <- vcf@meta[grepl("##contig", vcf@meta)]
+      chrom_lengths <- sapply(contigs, function(contig) {
+            contig <- gsub("##contig=<ID=|>", "", contig)
+            parts <- strsplit(contig, ",length=")[[1]]
+            chrom <- parts[1]
+            length <- as.numeric(parts[2])
+            return(c(chrom, length))
+      })
+          
+      # Create Seqinfo object
+      seqinfo_obj <- Seqinfo(seqnames = chrom_lengths[1,], seqlengths = as.numeric(chrom_lengths[2,]))
+      
+      # Extract INFO field with SV types
+      svtypes <- extract.info(vcf, element = "SVTYPE")
+      
+      # Get structural variants of interest
+      sv_indices <- which(svtypes %in% c("BND", "DEL", "DUP", "INS", "INV"))
+      sv_variants <- vcf[sv_indices, ]
+      
+      # Get start and end coordinates
+      chrom <- getCHROM(sv_variants)
+      start_coords <- getPOS(sv_variants)
+      end_coords <- sapply(strsplit(extract.info(sv_variants, "END"), ";"), function(x) as.numeric(x[1]))
+      
+      # Construct data frame
+      df <- data.frame(seqnames = chrom,
+                      start = start_coords,
+                      end = ifelse(is.na(end_coords), start_coords, end_coords),
+                      svtype = svtypes[sv_indices])
+      
+      # Split data frame by SV type
+      df_split <- split(df, df$svtype)
+      
+      # Create GRanges object
+      gr <- c(GRanges(df_split$BND$seqnames, IRanges(df_split$BND$start, df_split$BND$end),seqinfo = seqinfo_obj),
+              GRanges(df_split$INS$seqnames, IRanges(df_split$INS$start, df_split$INS$end),seqinfo = seqinfo_obj),
+              GRanges(df_split$DEL$seqnames, IRanges(df_split$DEL$start, df_split$DEL$start),seqinfo = seqinfo_obj),
+              GRanges(df_split$DEL$seqnames, IRanges(df_split$DEL$end, df_split$DEL$end),seqinfo = seqinfo_obj),
+              GRanges(df_split$DUP$seqnames, IRanges(df_split$DUP$start, df_split$DUP$start),seqinfo = seqinfo_obj),
+              GRanges(df_split$DUP$seqnames, IRanges(df_split$DUP$end, df_split$DUP$end),seqinfo = seqinfo_obj),
+              GRanges(df_split$INV$seqnames, IRanges(df_split$INV$start, df_split$INV$start),seqinfo = seqinfo_obj),
+              GRanges(df_split$INV$seqnames, IRanges(df_split$INV$end, df_split$INV$end),seqinfo = seqinfo_obj))
+      
+      # Assign Seqinfo to GRanges object
+      seqinfo(gr) <- seqinfo_obj
+      
+      # Filter chromosomes
+      gr <- gr[which(seqnames(gr) %in% paste0("chr", c(1:22, "X", "Y")))]
+
+      # Add flanks and trim. 
+      gr <- reduce(trim((flank(gr, width = window, both = TRUE))))
+      
+      return(gr)
+    }
+
     # remove sex chromosomes
     if (filter.sex.chromosomes){
         if ("chrX" %in% seqnames(gr) || "chrY" %in% seqnames(gr)){
@@ -575,10 +643,17 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
         diffmeth <- bsseqDiffRegion(aml.bs[,c(namehap1,namehap2)],gr,group1 = namehap1, group2 = namehap2)
         gr <- gr[which(abs(diffmeth$meth.diff)>min.diff)]
     }
-  
+
+    # get divergent regions from VCF file and add to excludeRegions
     if(!is.null(vcffile)){
       excludeRegions <- c(excludeRegions,getDivergentRegions(vcffile))
     }
+
+    # get SV regions from VCF file and add to excludeRegions
+    if(!is.null(svvcffile)){
+      excludeRegions <- c(excludeRegions,get_sv_breakends(svvcffile, window = sv.breakend.window))
+    }
+
     # remove dmrs in imprinted or highly divergent regions or any other regions to exclude
     # note we could add the Vcf as an input and obtain the highly divergent regions on the fly
     if (length(excludeRegions)>0){
