@@ -668,8 +668,11 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
 
     mcols(gr) <- methDf
 
-    # filter based on total coverage, and minimum difference in methylation
+    # (re)filter based on minimum difference in methylation. This is done at the callDmrs step, but redo with raw 5mC values
     gr <- gr[which(abs(rowDiffs(as.matrix(as.data.frame(mcols(gr)[,c(namehap1,namehap2)]))))>min.diff)]
+    
+    # filter based on haplotype methylation purity. Haplotypes should be either near 1 or 0 and not in the middle. This uses min.diff to set the filtering value.
+    gr <- gr[which(abs(mcols(gr)[[namehap1]] - 0.5) > min.diff/2 & abs(mcols(gr)[[namehap2]] - 0.5) > min.diff/2)]
     
     # only keep dmrs where one haplotype is >0.4 different from the normal.
     if (!is.null(normal.bs)){
@@ -698,7 +701,6 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
 #' @param min.diff Numeric value specifying the minimum methylation difference to consider (default: 0.4).
 #' @param min.cpgs Integer specifying the minimum number of CpGs required in a region (default: 5).
 #' @param min.length Integer specifying the minimum length of a region in base pairs (default: 100).
-#' @param min.coverage Integer specifying the minimum coverage required for a region (default: 60).
 #' @param excludeRegions A GRanges object specifying regions to exclude from the analysis.
 #' @param filter.sex.chromosomes Logical indicating whether to filter out sex chromosomes (default: TRUE).
 #'
@@ -727,7 +729,7 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
 #' @importFrom dplyr mutate case_when
 #'
 #' @export
-filterDmrs <- function(gr,bs,normal.bs=NULL,min.diff=.4,min.cpgs=5,min.length=100,min.coverage=60,excludeRegions,filter.sex.chromosomes=TRUE){
+filterDmrs <- function(gr,bs,normal.bs=NULL,min.diff=.4,min.cpgs=5,min.length=100,excludeRegions,filter.sex.chromosomes=TRUE){
     require(methylKit)
     require(bsseq)
     
@@ -770,7 +772,6 @@ filterDmrs <- function(gr,bs,normal.bs=NULL,min.diff=.4,min.cpgs=5,min.length=10
     # filter based on minimum number of observed CpGs, length, total coverage, and minimum difference in methylation
     gr <- gr[countOverlaps(gr,bs)>=min.cpgs]
     gr <- gr[which(width(gr)>=min.length)]
-    gr <- gr[which(rowMins(getCoverage(bs,regions=gr,what="perRegionTotal"))>min.coverage)]
     gr <- gr[which(abs(rowDiffs(as.matrix(as.data.frame(mcols(gr)[,c(sample.name,normal.sample.name)]))))>min.diff)]
     
     # only keep dmrs where one haplotype is >0.4 different from the normal.
