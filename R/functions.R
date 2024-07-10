@@ -905,3 +905,39 @@ inferGRanges <- function(input, chr_col = NULL, start_col = NULL, end_col = NULL
   
   stop("Input must be either a data frame or a valid file path.")
 }
+
+
+#' Parse bamstats output file
+#'
+#' @param statsfile path to bamstats output file
+#'
+#' @return a list with basic stats and histogram of read lengths
+#'
+#' @importFrom dplyr mutate filter pull select
+#' @importFrom tibble tibble
+#' @importFrom readr read.table
+#'
+parseBamStats <- function(statsfile){
+  stats <- list()
+  dat <- read.table(statsfile,sep = "\t",comment.char = "#",fill=T) %>% mutate(V2=gsub(":","",V2),V3=as.numeric(V3))
+  
+  # basic stats
+  stats$reads <- dat %>% filter(V2=="raw total sequences") %>% pull(V3)
+  stats$mapped_reads <- dat %>% filter(V2=="reads mapped") %>% pull(V3)
+  stats$total_bases <- dat %>% filter(V2=="total length") %>% pull(V3)
+  stats$mapped_bases <- dat %>% filter(V2=="bases mapped (cigar)") %>% pull(V3)
+  stats$error_rate <- dat %>% filter(V2=="error rate") %>% pull(V3)
+  stats$mean_read_length <- dat %>% filter(V2=="average length") %>% pull(V3)
+  stats$mean_coverage <- stats$mapped_bases/3143893127
+  
+  # read length histogram
+  stats$read_lengths <- dat %>% filter(V1=="FRL") %>% tibble(length=as.numeric(V2),count=as.numeric(V3))
+  
+  # n50
+  stats$n50 <- stats$read_lengths %>% mutate(bases=as.numeric(length)*as.numeric(count)) %>% mutate(cumbases=cumsum(bases)) %>% mutate(n50=ifelse(cumbases<stats$total_bases/2,1,0)) %>% filter(n50==0) %>% slice(1) %>% pull(length)
+  
+  # coverage distn
+  stats$coverage_distn <- dat %>% filter(V1=="COV") %>% mutate(coverage_bin=V2,coverage=as.numeric(V3),nt=as.numeric(V4),percent=as.numeric(V4)/3143893127) %>% tibble(coverage_bin,coverage,nt,percent)
+  
+  return(stats)
+}
