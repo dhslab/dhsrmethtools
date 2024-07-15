@@ -444,6 +444,8 @@ callDmrs <- function(sample_dir,
 #' @param svvcffile Path to SV VCF file for filtering out DMRs near SVs (optional).
 #' @param sv.breakend.window bp to flank SV breakends for filtering DMRs (default: 1000).
 #' @param min.diff Numeric value specifying the minimum methylation difference to consider (default: 0.4).
+#' @param purity.tolerance Numeric value specifying the maximum allowable purity deviation (default: 0.4).
+#' @param purity.tolerance.p.value One-sided P-value cutoff for binomial test of methylation counts against purity.tolerance or 1-purity.tolerance (default: 0.01).
 #' @param excludeRegions A GRanges object specifying regions to exclude from the analysis (default: empty GRanges).
 #' @param namehap1 Character string specifying the name of haplotype 1 in the aml.bs object (default: first sample name containing "hap1").
 #' @param namehap2 Character string specifying the name of haplotype 2 in the aml.bs object (default: first sample name containing "hap2").
@@ -475,7 +477,7 @@ callDmrs <- function(sample_dir,
 #' @importFrom GenomicRanges GRanges
 #'
 #' @export
-filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffile=NULL,svvcffile=NULL,sv.breakend.window=1000,min.diff=.4,excludeRegions=GRanges(),namehap1=grep("hap1",sampleNames(aml.bs),value=T)[1],namehap2=grep("hap2",sampleNames(aml.bs),value=T)[1],filter.sex.chromosomes=TRUE,run.fisher.test=FALSE){
+filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffile=NULL,svvcffile=NULL,sv.breakend.window=1000,min.diff=.4,purity.tolerance=0.4,purity.tolerance.p.value=0.01,excludeRegions=GRanges(),namehap1=grep("hap1",sampleNames(aml.bs),value=T)[1],namehap2=grep("hap2",sampleNames(aml.bs),value=T)[1],filter.sex.chromosomes=TRUE,run.fisher.test=FALSE){
     require(methylKit)
     require(bsseq)
     require(vcfR)
@@ -660,6 +662,30 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
         gr <- subsetByOverlaps(gr,excludeRegions,invert = T)
     }
 
+    # Retain only DMRs where hap1 and hap2 are significantly methylated and unmethylated (or vice versa) via one-sided binomial test
+    # vs. either <0.4 or > 0.6 (nominal p-value < 0.05)
+    hap1.counts <- cbind(getCoverage(aml.bs[,namehap1],region=gr,type="M",what="perRegionTotal"),getCoverage(aml.bs[,namehap1],region=gr,type="Cov",what="perRegionTotal"))
+    hap2.counts <- cbind(getCoverage(aml.bs[,namehap2],region=gr,type="M",what="perRegionTotal"),getCoverage(aml.bs[,namehap2],region=gr,type="Cov",what="perRegionTotal"))
+    
+    binom_probs <- cbind(apply(hap1.counts, 1, function(row) {
+                                k <- row[1]   # Number of successes (first column)
+                                n <- row[2]   # Number of trials (second column)
+                                binom.test(k, n, p = purity.tolerance,alternative = "l")$p.value }),
+                         apply(hap1.counts, 1, function(row) {
+                                k <- row[1]   # Number of successes (first column)
+                                n <- row[2]   # Number of trials (second column)
+                                binom.test(k, n, p = 1-purity.tolerance,alternative = "g")$p.value }),
+                        apply(hap2.counts, 1, function(row) {
+                                k <- row[1]   # Number of successes (first column)
+                                n <- row[2]   # Number of trials (second column)
+                                binom.test(k, n, p = purity.tolerance,alternative = "l")$p.value }),
+                        apply(hap2.counts, 1, function(row) {
+                                k <- row[1]   # Number of successes (first column)
+                                n <- row[2]   # Number of trials (second column)
+                                binom.test(k, n, p = 1-purity.tolerance,alternative = "g")$p.value }))
+    
+    gr <- gr[which((binom_probs[,1]<purity.tolerance.p.value & binom_probs[,4]<purity.tolerance.p.value) | (binom_probs[,2]<purity.tolerance.p.value & binom_probs[,3]<purity.tolerance.p.value))]
+    
     # create mcol DataFrame with methylation values
     methDf <- getMeth(aml.bs,regions=gr,type="raw",what="perRegion")
     if (!is.null(normal.bs)){
@@ -667,16 +693,21 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
     }
 
     mcols(gr) <- methDf
-
-    # (re)filter based on minimum difference in methylation. This is done at the callDmrs step, but redo with raw 5mC values
-    gr <- gr[which(abs(rowDiffs(as.matrix(as.data.frame(mcols(gr)[,c(namehap1,namehap2)]))))>min.diff)]
-    
-    # filter based on haplotype methylation purity. Haplotypes should be either near 1 or 0 and not in the middle. This uses min.diff to set the filtering value.
-    gr <- gr[which(abs(mcols(gr)[[namehap1]] - 0.5) > min.diff/2 & abs(mcols(gr)[[namehap2]] - 0.5) > min.diff/2)]
     
     # only keep dmrs where one haplotype is >0.4 different from the normal.
     if (!is.null(normal.bs)){
-      gr <- gr[which(abs(mcols(gr)[[namehap1]]-mcols(gr)[[normal.sample.name]]) > min.diff | abs(mcols(gr)[[namehap2]]-mcols(gr)[[normal.sample.name]]) > min.diff)]
+      normal.counts <- cbind(getCoverage(normal.bs,region=gr,type="M",what="perRegionTotal"),getCoverage(normal.bs,region=gr,type="Cov",what="perRegionTotal"))
+      normal_binom_probs <- cbind(apply(normal.counts, 1, function(row) {
+                                  k <- row[1]   # Number of successes (first column)
+                                  n <- row[2]   # Number of trials (second column)
+                                  binom.test(k, n, p = purity.tolerance,alternative = "l")$p.value }),
+                           apply(normal.counts, 1, function(row) {
+                                  k <- row[1]   # Number of successes (first column)
+                                  n <- row[2]   # Number of trials (second column)
+                                  binom.test(k, n, p = 1-purity.tolerance,alternative = "g")$p.value }))
+                           
+      gr <- gr[which(rowMins(normal_binom_probs)<purity.tolerance.p.value)]
+
       mcols(gr) <- data.frame(mcols(gr),check.names = F) %>%
         mutate(type = case_when(
             abs(!!sym(normal.sample.name) - !!sym(namehap1)) > abs(!!sym(normal.sample.name) - !!sym(namehap2)) & !!sym(namehap1) < !!sym(normal.sample.name) ~ "hap1_hypo",
@@ -687,6 +718,7 @@ filterHapDmrs <- function(gr,aml.bs,normal.bs=NULL,normal.sample.name=NULL,vcffi
     }   
     return(gr)
 }
+
 
 
 #' filterDmrs
