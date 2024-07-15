@@ -966,10 +966,113 @@ parseBamStats <- function(statsfile){
   stats$read_lengths <- dat %>% filter(V1=="FRL") %>% tibble(length=as.numeric(V2),count=as.numeric(V3))
   
   # n50
-  stats$n50 <- stats$read_lengths %>% mutate(bases=as.numeric(length)*as.numeric(count)) %>% mutate(cumbases=cumsum(bases)) %>% mutate(n50=ifelse(cumbases<stats$total_bases/2,1,0)) %>% filter(n50==0) %>% slice(1) %>% pull(length)
+  stats$n50 <- stats$read_lengths %>% mutate(bases=as.numeric(length)*as.numeric(count)) %>% mutate(cumbases=cumsum(bases)) %>% mutate(n50=ifelse(cumbases<stats$total_bases/2,1,0)) %>% filter(n50==0) %>% dplyr::slice(1) %>% pull(length)
   
   # coverage distn
-  stats$coverage_distn <- dat %>% filter(V1=="COV") %>% mutate(coverage_bin=V2,coverage=as.numeric(V3),nt=as.numeric(V4),percent=as.numeric(V4)/3143893127) %>% tibble(coverage_bin,coverage,nt,percent)
+  stats$coverage_distn <- dat %>% filter(V1=="COV") %>% mutate(coverage_bin=V2,coverage=as.numeric(V3),nt=as.numeric(V4),percent=as.numeric(V4)/3143893127) %>% select(coverage_bin,coverage,nt,percent)
   
   return(stats)
+}
+
+#' Annotate DMRs with genome annotations
+#' 
+#' Annotate DMRs with genome annotations, including custom annotations, and methylation values from user-provided BSseq objects.
+#' 
+#' @param gr character or GRanges object. The DMRs to annotate. If a character, assumed to be a path to a .rda file with a GRanges object named 'filtered_dmrs'.
+#' @param annots_beds character vector of file paths to custom annotation BED files.
+#' @param annots_names character vector of names for custom annotations. If NULL, the names will be the base names of the BED files.
+#' @param bsseq_paths character vector of file paths to BSseq objects.
+#' @param hg38_features character vector of genome annotation features to include. Default: c("hg38_genes_promoters", "hg38_genes_intergenic", "hg38_cpg_islands", "hg38_basicgenes").
+#' @return GRanges object with annotations.
+#' @export
+annotateDmrs <- function(gr, annots_beds = NULL, annots_names = NULL, 
+                         bsseq_paths = NULL, 
+                         hg38_features = c("hg38_genes_promoters", "hg38_genes_intergenic", 
+                                           "hg38_cpg_islands", "hg38_basicgenes")) {
+  # Load DMRs, if gr is a file path to a .rda file. Else assume gr is a GRanges object
+  if (is.character(gr) && grepl("\\.rda$", gr)) {
+    if (!file.exists(gr)) {
+      stop("DMRs file does not exist.")
+    }
+    load(gr)
+    dmrs <- filtered_dmrs
+  } else {
+    dmrs <- gr
+  }
+
+  # Process BSseq objects, ensure sample names are unique
+  bsseq_obj_list <- list()
+  all_sample_names <- character(0)
+  
+  if (!is.null(bsseq_paths)) {
+    for (i in seq_along(bsseq_paths)) {
+      # Load the BSseq object
+      bs <- HDF5Array::loadHDF5SummarizedExperiment(dir = bsseq_paths[i])
+      bs_samples <- sampleNames(bs)
+      
+      # Ensure unique sample names
+      for (j in seq_along(bs_samples)) {
+        original_name <- bs_samples[j]
+        new_name <- original_name
+        suffix <- 1
+        while (new_name %in% all_sample_names) {
+          new_name <- paste0(original_name, "_", suffix)
+          suffix <- suffix + 1
+        }
+        bs_samples[j] <- new_name
+      }
+      
+      # Update sample names in the BSseq object if they were changed
+      if (!identical(sampleNames(bs), bs_samples)) {
+        sampleNames(bs) <- bs_samples
+      }
+      
+      # Extract methylation data for each sample and add it to the DMRs object
+      for (j in seq_along(bs_samples)) {
+        sample_name <- bs_samples[j]
+        sample_mtx <- getMeth(bs, regions = dmrs, type = "raw", what = "perRegion")
+        mcols(dmrs)[[sample_name]] <- sample_mtx
+      }
+      
+      bsseq_obj_list[[i]] <- bs
+      all_sample_names <- c(all_sample_names, bs_samples)
+    }
+  }
+  
+  # Handle custom annotations
+  custom_annotations_granges <- list()
+  
+  # Set default annotation names based on file basenames if not provided
+  if (is.null(annots_names) && !is.null(annots_beds)) {
+    annots_names <- basename(annots_beds)
+    annots_names <- sub("\\..*", "", annots_names)
+  }
+  
+  # Ensure the number of annotation names matches the number of custom annotation files
+  if (!is.null(annots_names) && !is.null(annots_beds)) {
+    if (length(annots_names) != length(annots_beds)) {
+      stop("The number of annotations names must match the number of custom annotation files.")
+    }
+  }
+  
+  # Read custom annotations into GRanges objects
+  for (i in seq_along(annots_beds)) {
+    custom_annotations_granges[[i]] <- read_annotations(con = annots_beds[i], genome = 'hg38', 
+                                                        name = annots_names[i], format = 'bed')
+  }
+  
+  # Prepare custom annotation names
+  custom_annotations_names <- paste0("hg38_custom_", annots_names)
+  
+  # Combine default hg38 features with custom annotations
+  annotation_features <- c(hg38_features, custom_annotations_names)
+  print(paste("Annotating DMRs with:", paste(annotation_features, collapse = ", ")))
+  # Build annotation object
+  ann <- build_annotations(genome = 'hg38', annotations = annotation_features)
+  
+  # Annotate DMRs with genome and custom annotations
+  dmrs_annotated <- annotate_regions(regions = dmrs, annotations = ann, ignore.strand = TRUE, 
+                                     quiet = FALSE)
+  
+  return(dmrs_annotated)
 }
