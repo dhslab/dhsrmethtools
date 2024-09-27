@@ -29,7 +29,7 @@ dragen2bsseq <- function(file,samplename=NULL){
   }
   if (!requireNamespace("GenomicRanges", quietly = TRUE)) {
     stop("Package 'GenomicRanges' is required but not installed.")
-  }
+  }git 
 
   if (is.null(samplename))
     samplename <- gsub(".CX_report.txt(.gz)?", "", basename(file))
