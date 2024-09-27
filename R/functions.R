@@ -15,7 +15,6 @@
 #' @examples
 #' dragen2bsseq(file=system.file("extdata", "test.bed.gz", package = "dhsrmethtools"),samplename="test")
 #' @export
-
 dragen2bsseq <- function(file,samplename=NULL){
   if (!requireNamespace("data.table", quietly = TRUE)) {
     stop("Package 'data.table' is required but not installed.")
