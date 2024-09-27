@@ -6,7 +6,52 @@
 #' @importFrom data.table fread
 #' @importFrom HDF5Array writeHDF5Array
 #' @importFrom DSS DMLtest
-NULL
+
+#' dragen2bsseq
+#' 
+#' @param file A DRAGEN bed file
+#' @param samplename basename(file)
+#' @return a bsseq object
+#' @examples
+#' dragen2bsseq(file=system.file("extdata", "test.bed.gz", package = "dhsrmethtools"),samplename="test")
+#' @export
+
+dragen2bsseq <- function(file,samplename=NULL){
+  if (!requireNamespace("data.table", quietly = TRUE)) {
+    stop("Package 'data.table' is required but not installed.")
+  }
+  # check for bsseq and HDF5Array
+  if (!requireNamespace("HDF5Array", quietly = TRUE)) {
+    stop("Package 'HDF5Array' is required but not installed.")
+  }
+  if (!requireNamespace("bsseq", quietly = TRUE)) {
+    stop("Package 'bsseq' is required but not installed.")
+  }
+  if (!requireNamespace("GenomicRanges", quietly = TRUE)) {
+    stop("Package 'GenomicRanges' is required but not installed.")
+  }
+
+  if (is.null(samplename))
+    samplename <- gsub(".CX_report.txt(.gz)?", "", basename(file))
+
+  data <- NULL
+  # Check if the file is gzipped
+  if (grepl("\\.gz$", file)) {
+    # Use zcat and awk to filter gzipped file
+    data <- data.table::fread(cmd = paste("gunzip -c ", file, " | awk -F'\t' '$1~/^chr[0-9XYM]+$/ && $6==\"CG\"'"), header = FALSE, col.names=c("chr","pos","strand","meth","unmeth","context","seq"))
+  } else {
+    # Use awk to filter regular file
+    data <- data.table::fread(cmd = paste("awk -F'\t' '$1~/^chr[0-9XYM]+$/ && $6==\"CG\"'"), header = FALSE, col.names=c("chr","pos","strand","meth","unmeth","context","seq"))
+  }
+  chromosomes <- paste0("chr",c(1:22,"X","Y"))
+  data <- data[chr %in% chromosomes]
+  data$meth <- data$meth * data$cov
+  hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
+  hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
+  bsOut <- strandCollapse(bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end),strand=data$strand),sampleNames=samplename),shift=TRUE)
+  return(bsOut)
+
+}
 
 #' bed2bsseq
 #'
