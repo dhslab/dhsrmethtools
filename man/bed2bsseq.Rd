@@ -7,7 +7,7 @@
 bed2bsseq(file, samplename = basename(file))
 }
 \arguments{
-\item{file}{A simplfied bed file with methylation: chr\tstart\tend\tmethylation\coverage}
+\item{file}{A simplfied bed file with methylation: chr\\tstart\\tend\\tmethylation\\tcoverage}
 
 \item{samplename}{basename(file)}
 }
