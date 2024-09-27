@@ -47,7 +47,7 @@ dragen2bsseq <- function(file,samplename=NULL){
   data$cov <- data$meth + data$unmeth
   hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
   hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
-  bsOut <- strandCollapse(bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end),strand=data$strand),sampleNames=samplename),shift=TRUE)
+  bsOut <- strandCollapse(bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$pos,data$pos),strand=data$strand),sampleNames=samplename),shift=TRUE)
   return(bsOut)
 
 }
