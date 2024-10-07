@@ -60,7 +60,7 @@ dragen2bsseq <- function(file,samplename=NULL){
 #' @examples
 #' bed2bsseq(file=system.file("extdata", "test.bed.gz", package = "dhsrmethtools"),samplename="test")
 #' @export
-bed2bsseq <- function(file,samplename=basename(file)){
+bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
   if (!requireNamespace("data.table", quietly = TRUE)) {
     stop("Package 'data.table' is required but not installed.")
   }
@@ -88,9 +88,13 @@ bed2bsseq <- function(file,samplename=basename(file)){
   chromosomes <- paste0("chr",c(1:22,"X","Y"))
   data <- data[chr %in% chromosomes]
   data$meth <- data$meth * data$cov
-  hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
-  hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
-  bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
+  if (hdf5){
+    hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
+    hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
+    bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
+  } else {
+    bsOut <- bsseq::BSseq(M = as.matrix(data$meth),Cov = as.matrix(data$cov),gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
+  }
   return(bsOut)
 }
 
