@@ -87,13 +87,16 @@ bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
   }
   chromosomes <- paste0("chr",c(1:22,"X","Y"))
   data <- data[chr %in% chromosomes]
+  # Get proper position for bsseq objects. We consider the C of CpG to be the position and it is collapsed by strand.
+  # If the width is 2, then take end - 1. If the width is 1, then take the end.
+  data$pos <- ifelse(data$end[1] - data$start[1] == 1, data$end, data$end - 1)
   data$meth <- data$meth * data$cov
   if (hdf5){
     hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
     hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
-    bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
+    bsOut <- bsseq::BSseq(M = hdf5_M,Cov = hdf5_C,gr=GRanges(data$chr,IRanges(data$pos,data$pos)),sampleNames=samplename)
   } else {
-    bsOut <- bsseq::BSseq(M = as.matrix(data$meth),Cov = as.matrix(data$cov),gr=GRanges(data$chr,IRanges(data$end,data$end)),sampleNames=samplename)
+    bsOut <- bsseq::BSseq(M = as.matrix(data$meth),Cov = as.matrix(data$cov),gr=GRanges(data$chr,IRanges(data$pos,data$pos)),sampleNames=samplename)
   }
   return(bsOut)
 }
