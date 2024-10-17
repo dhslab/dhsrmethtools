@@ -80,10 +80,10 @@ bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
   # Check if the file is gzipped
   if (grepl("\\.gz$", file)) {
     # Use zcat and awk to filter gzipped file
-    data <- data.table::fread(cmd = paste("gunzip -c ", file, " | awk -F'\t' '$1~/^chr[0-9XYM]+$/'"), header = FALSE, col.names=c("chr","start","end","meth","cov"))
+    data <- data.table::fread(cmd = paste("gunzip -c ", file, " | awk -F'\t' '$1~/^chr[0-9XYM]+$/' | cut -f 1-5"), header = FALSE, col.names=c("chr","start","end","meth","cov"))
   } else {
     # Use awk to filter regular file
-    data <- data.table::fread(cmd = paste("awk -F'\t' '$1~/^chr[0-9XYM]+$/' ", file), header = FALSE, col.names=c("chr","start","end","meth","cov"))
+    data <- data.table::fread(cmd = paste("awk -F'\t' '$1~/^chr[0-9XYM]+$/' ", file, " | cut -f 1-5"), header = FALSE, col.names=c("chr","start","end","meth","cov"))
   }
   chromosomes <- paste0("chr", c(1:22, "X", "Y"))
 
