@@ -85,11 +85,22 @@ bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
     # Use awk to filter regular file
     data <- data.table::fread(cmd = paste("awk -F'\t' '$1~/^chr[0-9XYM]+$/' ", file), header = FALSE, col.names=c("chr","start","end","meth","cov"))
   }
-  chromosomes <- paste0("chr",c(1:22,"X","Y"))
+  chromosomes <- paste0("chr", c(1:22, "X", "Y"))
+
+  # Filter data.table based on chromosome
   data <- data[chr %in% chromosomes]
+
+  # Calculate proper position for bsseq objects
+  if(data$end[1] - data$start[1] == 1){
+    data[, pos := end]
+  } else{
+    data[, pos := end - 1]
+  }
+  # Update the 'meth' column
+  data[, meth := meth * cov]
+
   # Get proper position for bsseq objects. We consider the C of CpG to be the position and it is collapsed by strand.
   # If the width is 2, then take end - 1. If the width is 1, then take the end.
-  data$pos <- ifelse(data$end[1] - data$start[1] == 1, data$end, data$end - 1)
   data$meth <- data$meth * data$cov
   if (hdf5){
     hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
