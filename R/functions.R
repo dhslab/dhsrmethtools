@@ -90,7 +90,8 @@ bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
   # Filter data.table based on chromosome
   data <- data[chr %in% chromosomes]
 
-  # Calculate proper position for bsseq objects
+  # Get proper position for bsseq objects. We consider the C of CpG to be the position and it is collapsed by strand.
+  # If the width is 2, then take end - 1. If the width is 1, then take the end.
   if(data$end[1] - data$start[1] == 1){
     data[, pos := end]
   } else{
@@ -99,9 +100,6 @@ bed2bsseq <- function(file,samplename=basename(file),hdf5=TRUE){
   # Update the 'meth' column
   data[, meth := meth * cov]
 
-  # Get proper position for bsseq objects. We consider the C of CpG to be the position and it is collapsed by strand.
-  # If the width is 2, then take end - 1. If the width is 1, then take the end.
-  data$meth <- data$meth * data$cov
   if (hdf5){
     hdf5_M <- HDF5Array::writeHDF5Array(as.matrix(data$meth))
     hdf5_C <- HDF5Array::writeHDF5Array(as.matrix(data$cov))
