@@ -1136,3 +1136,148 @@ annotateDmrs <- function(gr, annots_beds = NULL, annots_names = NULL,
   
   return(dmrs_annotated)
 }
+
+#' locus_heatmap
+#' Create a heatmap of methylation scores across genomic regions
+#' @param regions GRanges object containing genomic regions to analyze.
+#' @param bs BSseq object containing methylation data (optional).
+#' @param signal GRanges object with scores (e.g., methylation scores).
+#' @param flank Numeric value specifying the flanking region size (default: 1000).
+#' @param bins Integer specifying the number of bins for the heatmap (default: 101).
+#' @param score_range Numeric vector of length 2 specifying the range of scores to display (default: NULL).
+#' @param region_fraction Numeric value specifying the fraction of the region to display (default: 0.25).
+#' @param interpolate Logical indicating whether to interpolate the scores (default: TRUE if bs is provided).
+#' @param aggregate Logical indicating whether to aggregate scores across regions (default: TRUE).
+#' @param scale_regions Logical indicating whether to scale regions (default: FALSE).
+#' @param scale_score Numeric value to scale the scores (default: FALSE).
+#' @param meth.type Character string specifying the type of methylation data to use (default: "smooth").
+#' @return A data frame containing the heatmap data.
+#' @details
+#' This function creates a heatmap of methylation scores across specified genomic regions.
+#' It can handle both BSseq objects and GRanges objects with scores.
+#' The function allows for scaling of regions and scores, interpolation of scores, and aggregation of scores across regions.
+#' #' @export
+locus_heatmap <- function(regions=NULL,bs=NULL,signal=NULL,flank=1000,bins=101,
+                          score_range=NULL,
+                          region_fraction=0.25,
+                          interpolate=!is.null(bs),
+                          aggregate=TRUE,
+                          scale_regions=FALSE,
+                          scale_score=FALSE,
+                          meth.type="smooth"){
+  require(stringr)
+  require(bsseq)
+  require(zoo)
+  
+  if (!is.null(bs)){
+    stopifnot(length(names(bs@parameters))>0)
+    stopifnot(dim(bs)[2]==1)
+    signal <- rowRanges(bs)
+    signal$score <- as.vector(bsseq::getMeth(bs,type = meth.type,what="perBase")[,1])
+  }
+  
+  if(scale_score!=FALSE && is.numeric(scale_score)){
+    signal$score <- oob_squish(signal$score/scale_score,range(0,1))
+  }
+  
+  if (is.null(score_range)){
+    score_range <- c(0,max(signal$score))
+  }
+  
+  # make region id for merging later if 'id' doesnt exist
+  if (!"id" %in% colnames(mcols(regions)))
+    regions$id <- str_c(as.character(seqnames(regions)),start(regions),end(regions),sep="_")
+  
+  # signal bins 
+  signal <- resize(signal,width = 1,fix="center") 
+  
+  if (scale_regions==FALSE){
+    
+    regions <- resize(regions,width = 2*flank+1,fix="center") 
+    ov <- findOverlaps(signal,regions)
+    x <- as.data.frame(signal[queryHits(ov)]) %>%
+      mutate(pos = floor(start+width/2)) %>% select(-start,-end, -width, -strand)
+    y <- as.data.frame(regions[subjectHits(ov)]) %>% mutate(group="region") %>% select(id,start,width,group)
+    z <- cbind(y,x) %>% mutate(x_pos = oob_squish(rescale((pos-start)/width,from = c(0,1),to=c(-1,1)),range=c(-1,1)))
+    
+    df <- z %>% mutate(x_bin=as.numeric(cut(x_pos,breaks=seq(-1,1,length.out=bins),include.lowest = TRUE))) %>% 
+      arrange(id,x_pos)
+  
+  } else {
+
+    ov <- findOverlaps(signal,regions)
+    x <- as.data.frame(signal[queryHits(ov)]) %>%
+      mutate(pos = floor(start+width/2)) %>% select(-start,-end, -width, -strand)
+    y <- as.data.frame(regions[subjectHits(ov)]) %>% mutate(group="region") %>% select(id,start,width,group)
+    z <- cbind(y,x) %>% mutate(x_pos = oob_squish(rescale((pos-start)/width,from = c(0,1),to=c(-1*region_fraction,1*region_fraction)),range=c(-1*region_fraction,1*region_fraction)))
+    
+    grup <- flank(regions,width=flank,start=T,both=F,ignore.strand=T)
+    ov <- findOverlaps(signal,grup)
+    x <- as.data.frame(signal[queryHits(ov)]) %>%
+      mutate(pos = floor(start+width/2)) %>% select(-start,-end, -width, -strand)
+    y <- as.data.frame(grup[subjectHits(ov)]) %>% mutate(group="flank") %>%  select(id,start,width,group)
+    zup <- cbind(y,x) %>% mutate(x_pos = oob_squish(rescale((pos-start)/width,from = c(0,1),to=c(-1,-1+(1-region_fraction))),range=c(-1,1)))
+    
+    grdown <- flank(regions,width=flank,start=F,both=F,ignore.strand=T)
+    ov <- findOverlaps(signal,grdown)
+    x <- as.data.frame(signal[queryHits(ov)]) %>%
+      mutate(pos = floor(start+width/2)) %>% select(-start,-end, -width, -strand)
+    y <- as.data.frame(grdown[subjectHits(ov)]) %>% mutate(group="flank") %>% select(id,start,width,group)
+    zdown <- cbind(y,x) %>% mutate(x_pos = oob_squish(rescale((pos-start)/width,from = c(0,1),to=c(1-(1-region_fraction),1)),range=c(-1,1)))
+    
+    df <- rbind(zup,z,zdown) %>% mutate(x_bin=as.numeric(cut(x_pos,breaks=seq(-1,1,length.out=bins),include.lowest = TRUE))) %>% 
+      arrange(id,x_pos)
+  
+  }
+
+  dfmat <- NULL
+  
+  if (aggregate==FALSE){
+    
+    dfmat <- merge(df,df %>% filter(group=="region") %>% group_by(id) %>% summarize(region_mean=mean(score),.groups='drop'),by="id") %>%
+            mutate(relative_pos=pos-start) %>%
+            arrange(-region_mean,id,x_bin) %>%
+            mutate(region_order = dense_rank(region_mean)-1) %>%
+            mutate(y = region_order/max(region_order)) %>%
+            mutate(x = round(((x_bin-1)/(max(x_bin)-1) - 0.5)/0.5,4))
+    
+  } else if(interpolate==TRUE || !is.null(bs)){
+    
+    dfmat <- merge(df %>% group_by(id,x_bin) %>% reframe(score=mean(score)) %>%
+                 complete(id, x_bin = c(1:(bins-1))) %>% arrange(id,x_bin) %>% 
+                 group_by(id) %>% reframe(x_bin=x_bin,
+                                          score = na.spline(score)) %>% 
+                 mutate(score = oob_squish(score,range=score_range)),
+                 df %>% filter(group=="region") %>% group_by(id) %>% summarize(region_mean=mean(score),.groups='drop'),by="id") %>% 
+            arrange(-region_mean,id,x_bin) %>%
+            mutate(region_order = dense_rank(region_mean)-1) %>%
+            mutate(y = round(region_order/max(region_order),4)) %>%
+            mutate(x = round(((x_bin-1)/(max(x_bin)-1) - 0.5)/0.5,4))
+
+  } else {
+    
+      dfmat <- merge(df %>% group_by(id,x_bin) %>% reframe(score=mean(score)) %>%
+                 complete(id, x_bin = c(1:(bins-1)),fill=list(score=0)) %>% arrange(id,x_bin) %>% 
+                 mutate(score = oob_squish(score,range=score_range)),
+                 df %>% filter(group=="region") %>% group_by(id) %>% summarize(region_mean=mean(score),.groups='drop'),by="id") %>% 
+            arrange(-region_mean,id,x_bin) %>%
+            mutate(region_order = dense_rank(region_mean)-1) %>%
+            mutate(y = round(region_order/max(region_order),4)) %>%
+            mutate(x = round(((x_bin-1)/(max(x_bin)-1) - 0.5)/0.5,4))
+  }
+  
+  # add actual relative position
+  if (scale_regions==TRUE){
+    dfmat <- dfmat %>% mutate(relative_pos=case_when(x >= -region_fraction & x <= region_fraction ~ 0,
+                                           x < -region_fraction ~ round(oob_squish(rescale(x,from=c(-1,-region_fraction),to=c(-flank,0)),range=c(-flank,0)),0),
+                                           x > region_fraction ~ round(oob_squish(rescale(x,from=c(region_fraction,1),to=c(0,flank)),range=c(0,flank)),0),
+                                           TRUE ~ NA)) %>%
+                       select(id,x,y,score,x_bin,relative_pos,region_order,region_mean)
+
+  } else {
+    dfmat <- dfmat %>% mutate(relative_pos=round(oob_squish(rescale(x,from=c(-1,1),to=c(-flank,flank)),range=c(-flank,flank)),0)) %>%
+                       select(id,x,y,score,x_bin,relative_pos,region_order,region_mean)
+  }
+  
+  return(dfmat)
+}
